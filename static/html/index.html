@@ -1,0 +1,491 @@
+<html>
+    <!-- to do: 
+        [ ] - position memory?
+        [x] - bed heat controls/display
+        [ ]
+    
+    -->
+    <head>
+        <script src="/static/js/jquery-3.6.0.min.js"></script>
+        <script src="/static/js/js.cookie.min.js"></script>
+        <script src="/static/js/gamecontroller.min.js"></script>
+        <script src="/socket.io/socket.io.js"></script>
+        <style>
+            body{font-family: Helvetica,Arial, sans-serif;}
+            img{width:100%}
+            input:read-only {color: silver;}
+
+            input{outline: none; border:none;border-bottom: 1px solid black;text-align: right;width:50px;}
+            .status{height:20px;}
+            textarea{outline: none; border: 1px solid black;text-align: left;width:50px;  resize:vertical;height:150px}
+            .img{float:right;max-height:500px;width:60%;}
+            .meta{width:200px;text-align:left}
+            h2::selection{background: white;}
+            .hider {visibility:hidden;}
+            .shower {visibility:visible;}
+            .terminal{
+                background:black;
+                color:green;
+                white-space:pre-wrap;
+                font-family: 'Courier New', Courier, monospace;
+                
+            }
+            td{vertical-align: top;}
+ 
+        </style>
+    </head>
+    <body>
+        <div id="image" class="img"></div>
+        <h1>Jacky Printo Forever</h1>
+        <div id="status_shell" class="status"><span id="status"></span></div>
+        <table>
+            <tr><td>move x/y</td><td><input id='movexy' value=0.2> </input>mm</td></tr>
+            <tr><td>move z</td><td><input id='movez' value=0.02> </input>mm</td></tr>
+            <tr><td>X</td><td><input id='posX' value=1 readonly> </input>mm</td><td><button attr='mvb' id='xb' title='⬅️'>x-</button><button attr='mvb' id='xf' title='➡️'>x+</button></td></tr>
+            <tr><td>Y</td><td><input id='posY' value=1 readonly> </input>mm</td><td><button attr='mvb' id='yb' title='⬇️'>y-</button><button attr='mvb' id='yf' title='⬆️'>y+</button></td></tr>
+            <tr><td>Z</td><td><input id='posZ' value=1 readonly> </input>mm</td><td><button attr='mvb' id='zb' title='s'>z-</button><button attr='mvb' id='zf' title='w'>z+</button></td></tr>
+            <tr><td>B actual</td><td><input id='bactual' value=0 readonly> </input>˚C</td><td></td></tr>
+            <tr><td>B set</td><td><input id='bset' value=0 readonly> </input>˚C</td><td></td></tr>
+            <tr><td>set B</td><td><input id='setb' value=25 > </input>˚C</td><td><button attr='mvb' id='tb'>set T</button></td></tr>
+        </table>
+
+        <h2 id="dispense_head">Dispenser Settings</h2>
+        <div id = "dispense_list">
+            <input id="dispense_in" style="width:200px;text-align:left;"></input><button id="dispense_send">Send</button>
+            <div id="dispense_out" class="terminal"></div>
+            fire ready <input type="checkbox" id="fire_ready" >
+
+        </div>
+
+        <h2 id="picture_head">Picture</h2>
+        <div id="picture_list">
+            <table>
+                <tr><td>project</td><td><input   attr="meta" id='project' class="meta" value="default"></input></td><td><button id="snapshot">📸</button></td></tr>
+                <tr><td>prefix</td><td><input    attr="meta" id='prefix' class="meta" value="snap"> </input></td></tr>
+                <tr><td>user</td><td><input      attr="meta" id='user' class="meta"> </input></td></tr>
+                <tr><td>date/time</td><td><input             id='datetime' class="meta" readonly> </input></td></tr>
+                <tr><td>notes</td><td><textarea  attr="meta" id='notes' class="meta"></textarea></td></tr>
+                
+            </table>
+        </div>
+
+        <h2 id='zscan_head'>Z Scan</h2>
+        <table id='zscan_table'>
+        <tr><td>Z endpoint (> current)</td><td><input id='z2'></input>mm</td><td><button id="do_zscan">go</button></td></tr>
+        <tr><td id='zscanstatus'>done</td></tr>
+        </table>
+
+        <h2 id="v42l_head">Camera Controls</h2>
+        <div id="v4l2_table"></div>
+
+        <h2 id="abs_move_head">Absolute Positioning</h2>
+        <div id="abs_move_table">
+        <table>
+            <tr><td>X</td><td><input id='absmoveX'> </input>mm</td><td><button id="absmove">go</button></td></tr>
+            <tr><td>Y</td><td><input id='absmoveY'> </input>mm</td></tr>
+            <tr><td>Z</td><td><input id='absmoveZ'> </input>mm</td></tr>
+            <tr><td><button id="zero">zero</button></td></tr>
+        </table>
+        </div>
+
+        <h2 id="ender_head">Ender Settings</h2>
+        <div id = "ender_list">
+            <input id="ender_in" style="width:200px;text-align:left;"></input><button id="ender_send">Send</button>
+             <div id="ender_out" class="terminal"></div>
+        </div>
+
+        <h2 id="exec_head">Spooky Scary</h2>
+        <div id = "exec_list">
+            <input id="exec_in" style="width:200px;text-align:left;"></input><button id="exec_send">Send</button>
+            <div id="exec_out" class="terminal"></div>
+        </div>
+    
+    <script>
+            surl = `http://${window.location.hostname}:${window.location.port}`
+            curl = `http://${window.location.hostname}:10001`
+            purl = `http://${window.location.hostname}:9001`
+
+            var socket = io();
+            socket.on('data', (msg) => {
+                find_position(msg);
+                find_temperature(msg);
+                
+                })
+ 
+            poslog = ""
+            function find_position(msg)
+            {
+                poslog += msg
+                pat = /(?=X)(.*?)(?=Count)/g
+                last_pos = [...poslog.matchAll(pat)]
+                a = new Date();
+                $("#datetime").val(a.toLocaleString());
+                if (last_pos.length > 0)
+                {
+                    parse_position(last_pos[last_pos.length-1][0])
+                    poslog="";
+                }
+            }
+            
+            function parse_position(str)
+            {
+                parts = str.trim().split(" ")
+                obj = {}
+                for (p in parts) obj[parts[p].split(":")[0]] = parts[p].split(":")[1]
+                if ($("#posX").val() != obj['X']) $("#posX").val(obj['X']).trigger("change");
+                if ($("#posY").val() != obj['Y']) $("#posY").val(obj['Y']).trigger("change");
+                if ($("#posZ").val() != obj['Z']) $("#posZ").val(obj['Z']).trigger("change");
+                return obj
+
+            }
+
+            templog=""
+            function find_temperature(msg)
+            {
+                templog += msg
+                pat = /(?=T)(.*?)(?=B@)/g
+                last_temp = [...templog.matchAll(pat)]
+                if (last_temp.length > 0)
+                {
+                    parse_temperature(last_temp[last_temp.length-1][0])
+                    templog="";
+                }
+            }
+            
+            function parse_temperature(str)
+            {
+                parts = str.trim().split(" ")
+                actual = parts[2].split(":").at(-1)
+                set = parts[3].split("/").at(-1)
+                $("#bactual").val(actual);
+                $("#bset").val(set);
+            }
+
+
+            // functions for v4l2 stuffs
+            function arb_exec(cmd,channel='exec'){$.post(`/exec`,data={'payload':cmd,'channel':channel})};
+            function arb_proc(cmd,channel='exec'){$.post(`/proc`,data={'payload':cmd,'channel':channel})};
+
+            v4l2_ctl = undefined
+            kk = undefined
+            function get_v4l2_ctl(){
+                $.post(`/v4l2-ctl-list`,
+                        (data)=>{
+                            v4l2_ctl = parse_v4l2_controls(data['stdout']);
+                            v4l2_tab = make_v4l2_table(v4l2_ctl);
+                            $("#v4l2_table").html(v4l2_tab);
+                            $("#v4l2_table").toggle();
+                            $('input[attr=v4l2_cntl]').change((ev)=>
+                            {
+                               cmd = `v4l2-ctl -d /dev/video0 -c ${ev.target.id.replace("#","")}=${ev.target.value}` 
+                               arb_exec(cmd)
+                            })
+                            }
+                        )
+                    };
+
+            
+            function get_camera_state()
+            {
+                cam_out = {}
+                cams = $('input[attr=v4l2_cntl]')
+                for (i = 0; i < cams.length;i++) 
+                {
+                 cam_out[cams[i].id.replace("#","")] = cams[i].value
+                }
+                return cam_out
+            }
+
+            function get_meta()
+            {
+                meta = {}
+                metas = $('[attr=meta]')
+                for (i = 0; i < metas.length;i++) 
+                {
+                    meta[metas[i].id.replace("#","")] = metas[i].value
+                }
+                return meta
+            }
+
+            function set_meta()
+            {
+                try
+                {
+                    meta = JSON.parse(Cookies.get("meta"))
+                    for (i in meta) $(`#${i}`).val(meta[i])
+                }
+                catch (error) {console.log(error)}
+                
+
+            }
+
+            function parse_v4l2_controls(str)
+            {
+                cntls = str.trim().split("\n")
+                obj = {}
+                for (c in cntls)
+                {
+                    cntl = cntls[c].trim().split(":")
+                    name = cntl[0].split(" ")[0]
+                    obj[name] = {}
+                    obj[name]['hex']  = cntl[0].split(" ")[1]
+                    obj[name]['type'] = cntl[0].split(" ")[2]
+                    for (a in cntl[1].trim().split(" "))
+                    {
+                        aa = cntl[1].trim().split(" ")[a].split("=");
+                        obj[name][aa[0]]=aa[1]
+                    }
+                }
+                return obj
+            }
+
+            function make_v4l2_table(obj){
+                out = "<table style='visibility:inherit;'>"
+                for (key in obj)
+                {
+                    out+=`<tr><td>${key}</td><td><input attr='v4l2_cntl' id='#${key}' value='${obj[key]['value']}'></td></tr>`
+                }
+                out+="</table>"
+                return out
+
+            }
+
+            function ultimus_cs(str1)
+            {
+                css = [];
+                for (i in str1){css.push(str1[i].charCodeAt(0))};
+                csum = css.reduce(function(a, b) { return a + b; }, 0);
+                csum = ((0-csum)&255).toString(16).toUpperCase();
+                return csum
+
+            }
+
+            function printer_control(str)
+            {
+                ll = str.length.toString().padStart(2,"0")
+                cs = ultimus_cs(ll+str)
+                fullcmd = "\x02"+ll+str+cs+"\x03"
+                $.post(purl+"/write",data={'payload':'\x05'+fullcmd})      
+                return fullcmd
+            }
+            
+            function togglePressure(){return printer_control("DI  ");}
+
+            $("#v42l_head").click(()=>{$("#v4l2_table").toggle()})
+            $("#zscan_head").click(()=>{$("#zscan_table").toggle()})            
+            $("#exec_head").click(()=>{$("#exec_list").toggle()})
+            $("#abs_move_head").click(()=>{$("#abs_move_table").toggle()})
+            $("#dispense_head").click(()=>{$("#dispense_list").toggle()})
+            $("#ender_head").click(()=>{$("#ender_list").toggle()})
+            $("#picture_head").click(()=>{$("#picture_list").toggle()})
+
+
+            $("#absmove").click(() =>
+                {
+                    x = parseFloat($("#absmoveX").val())
+                    y = parseFloat($("#absmoveY").val())
+                    z = parseFloat($("#absmoveZ").val())
+                    absmove(x,y,z)
+                }
+            )
+
+            $("#zero").click(()=>{$.post(`/write`,data={'payload':`G92 X0 Y0 Z0\n`})})
+
+
+            //Dispenser Control
+            $("#dispense_send").click(()=>{printer_control($("#dispense_in").val());})
+
+
+            //Ender Control
+            function ender_sender(str){$.post(`/write`,data={'payload':`${str}\n`})};
+            $("#ender_send").click(()=>{ender_sender($("#ender_in").val())});
+            $("#tb").click(()=>ender_sender(`M140 S${$("#setb").val()}`));
+
+            //Let's execute arbirary code!
+            $("#exec_send").click(()=>{arb_exec($("#exec_in").val())})
+            socket.on('exec',(msg) =>{$("#exec_out").html(msg)});
+            socket.on('zscan',(msg) =>{
+                $("#zscanstatus").html(msg)
+                if (msg.search("done")>-1) $("#do_zscan").attr("disabled",false);
+            });
+
+            //auto zscan
+            function zscan()
+            {
+                $("#zscanstatus").html("starting...")
+                $("#do_zscan").attr("disabled",true)
+                z2 = $("#z2").val();
+                z1 = $("#posZ").val();
+                project = $("#project").val();
+                prefix  = $("#prefix").val(); 
+                user  = $("#prefix").val(); 
+                cmd = `python3 -u /home/pi/pithy/code/enderscope_z_scan.py prefix=${prefix} project=${project} user=${user} z1=${z1} z2=${z2}`
+                arb_proc(cmd,channel="zscan");
+            }
+
+            $("#do_zscan").click(zscan);
+
+            //stage control
+            function move(x,y,z)
+            {
+                out = `G91\nG0 F2000 X${x} Y${y} Z${z}`
+                $.post(`/write`,data={'payload':`${out}\n`})
+            }
+
+            function absmove(x,y,z)
+            {
+                out = `G90\nG0 F2000 X${x} Y${y} Z${z}`
+                $.post(`/write`,data={'payload':`${out}\n`})
+            }
+
+            function get_position(){$.post(`/write`,data={'payload':'M114\n'})}
+            
+            function steppers_off(){$.get(`/writecf/M18 X Y Z`)}
+
+
+            function snapshot()
+            {
+                tt = new Date()
+                data = {}
+                data['project'] =$("#project").val()
+                data['prefix'] = $("#prefix").val()
+                data['user']   = $("#user").val()
+                data['position'] = {'x':$("#posX").val(),'y':$("#posY").val(),'z':$("#posZ").val()}
+                data['notes'] = $("#notes").val()
+                data['camera'] = get_camera_state();
+                data['date'] = tt.getTime();
+                console.log(data)
+                $.post("/snapshot",data,(res)=>{
+                    console.log(res);
+                    $("#status").html(`saved ${$("#project").val()}/${$("#prefix").val()}`)
+                    $("#status").fadeIn()
+                    $("#status").fadeOut("slow",()=>{$("#status").html("")})
+; 
+                })
+            }
+
+
+            $(window).keydown((e)=>{
+                zz = parseFloat($("#movez").val())
+                xy = parseFloat($("#movexy").val())
+                if ($("input").is(":focus") == false & $("textarea").is(":focus") == false)
+                {
+                    switch(e.originalEvent.keyCode)
+                    {
+                        case 37: move(-1*xy,0,0); break;
+                        case 39: move(1*xy,0,0);break;
+                        case 38: move(0,1*xy,0);break;
+                        case 40: move(0,-1*xy,0);break;
+                        case 87: move(0,0,zz);break;
+                        case 83: move(0,0,-1*zz);break;
+                        case 77: get_position();break;
+                        case 79: steppers_off();break;
+                        case 67: snapshot();break;
+                        case 71: if ($("#fire_ready")[0].checked){togglePressure()};break;
+                    }
+                }
+
+            })
+
+            //buttons for the olds, or youngs I guess
+            $("#xf").click((e)=>{xy = parseFloat($("#movexy").val());move( xy,0,0)})
+            $("#xb").click((e)=>{xy = parseFloat($("#movexy").val());move(-xy,0,0)})
+            $("#yf").click((e)=>{xy = parseFloat($("#movexy").val());move(0, xy,0)})
+            $("#yb").click((e)=>{xy = parseFloat($("#movexy").val());move(0,-xy,0)})
+            $("#zf").click((e)=>{xy = parseFloat($("#movezz").val());move(0,0, zz)})
+            $("#zb").click((e)=>{xy = parseFloat($("#movezz").val());move(0,0,-zz)})
+            $("#snapshot").click((e)=>{snapshot();})
+
+            //gamepad!
+            keymap = [['up',"U"],['down',"D"],['left',"L"],['right',"R"],['button0',"X"],['button1',"A"],['button2',"B"],['button3',"Y"],['button4',"TL"],['button5',"TR"],['button8',"select"],['button9',"start"]]
+            jog = false;
+            gameControl.on('connect',(gp)=>{for (let i = 0; i < keymap.length;i++) 
+                {
+                    gp.before(keymap[i][0],()=>{
+                        switch(keymap[i][1])
+                        {
+                            case "Y": jog=true; break;
+                            case "U": case "D": case "L": case "R": case "TR": case "TL": case "A": game_move(keymap[i][1]);
+                        }
+                    })
+                    .on(keymap[i][0],()=>{
+                        switch(keymap[i][1])
+                        {
+                            case "U": case "D": case "L": case "R": case "TR": case "TL": if(jog)game_move(keymap[i][1]);break;
+                        }
+                    })
+                    .after(keymap[i][0],()=>{
+                        switch(keymap[i][1])
+                        {
+                            case "Y": jog=false;break;
+                        }})
+                }})
+            function game_move(dir)
+            {
+                zz = parseFloat($("#movez").val())
+                xy = parseFloat($("#movexy").val())
+                switch(dir)
+                {
+                    case "L": move(-1*xy,0,0); break;
+                    case "R": move(1*xy,0,0);break;
+                    case "U": move(0,1*xy,0);break;
+                    case "D": move(0,-1*xy,0);break;
+                    case "TR": move(0,0,zz);break;
+                    case "TL": move(0,0,-1*zz);break;
+                    case "A" : snapshot(); break;
+                    // case 77: get_position();break;
+                    // case 79: steppers_off();break;
+                    // case 67: snapshot();break;
+
+                }
+
+            }
+
+
+            //on load
+            $("#image").html(`<img src="${curl}/.?action=stream">`)
+
+            //fill meta from cookie
+            set_meta()
+
+            //reset camera
+            arb_exec(`
+            v4l2-ctl -d /dev/video0 -c exposure_auto=1;
+            v4l2-ctl -c white_balance_temperature_auto=1;
+            v4l2-ctl -c gamma=100`)
+            //get controls
+            get_v4l2_ctl();
+            $("#zscan_table").toggle();
+            $("#abs_move_table").toggle();
+            //$("#dispense_list").toggle()
+            $("#ender_list").toggle()
+            $("#picture_list").toggle()
+
+            //hide spooky scary
+            $("#exec_head").toggle()
+            $("#exec_list").toggle()
+
+            //hide zscan for printing 
+            $("#zscan_head").toggle();
+            
+
+
+            //register listeners
+            $('input[attr=meta]').change(()=>{Cookies.set("meta",JSON.stringify(get_meta()))});
+            $("#posX").change((ev)=>{$("#absmoveX").val($("#posX").val())})
+            $("#posY").change((ev)=>{$("#absmoveY").val($("#posY").val())})
+            $("#posZ").change((ev)=>{$("#absmoveZ").val($("#posZ").val())})
+
+
+            //stop the scroll 
+            window.addEventListener("keydown", function(e) {
+            if(["ArrowUp","ArrowDown"].indexOf(e.code) > -1) 
+            {e.preventDefault();}
+            }, false);
+
+
+        </script>
+
+    </body>
+
+</html>
