@@ -115,26 +115,25 @@
             <tr><td>Y</td><td><input id='posY' value=1 readonly> </input>mm</td><td><button attr='mvb' id='yb' title='⬇️'>y-</button><button attr='mvb' id='yf' title='⬆️'>y+</button></td></tr>
             <tr><td>Z</td><td><input id='posZ' value=1 readonly> </input>mm</td><td><button attr='mvb' id='zb' title='s'>z-</button><button attr='mvb' id='zf' title='w'>z+</button></td></tr>
             <tr><td>B actual</td><td><input id='bactual' value=0 readonly> </input>˚C</td><td></td></tr>
-            <tr><td>B set</td><td><input id='bset' value=0 readonly> </input>˚C</td><td></td></tr>
-            <tr><td>set B</td><td><input id='setb' value=25 > </input>˚C</td><td><button attr='mvb' id='tb'>set T</button></td></tr>
+            <tr><td>B set</td><td><input id='bset' value=0 readonly> </input>˚C</td><td><input id='setb'  > </input>˚C</td><td><button attr='mvb' id='tb'>set</button></td></tr>
         </table>
 
         <h2 id="dispense_head">Dispenser Settings</h2>
         <div id = "dispense_list">
             <table>
-            <tr><td>set pressure</td><td><input id='pressure' value=50> </input>psi</td><td><button id='set_pressure'>set</button></td></tr>
-            <tr><td>set dispense time</td><td><input id='dispensetime' value=0.01> </input>s</td><td><button id='set_dispensetime'>set</button></td></tr>
-            <tr><td>set vacuum</td><td><input id='vacuum' value=0.9 > </input>torr</td><td><button id='set_vacuum'>set</button></td></tr>
+            <tr><td>pressure</td>      <td><input id="rpressure" readonly> psi  </td>     <td><input id='pressure'> </input>psi</td><td><button id='set_pressure'>set</button></td></tr>
+            <tr><td>dispense time</td> <td><input id="rdispensetime" readonly> s </td>     <td><input id='dispensetime'> </input>s</td><td><button id='set_dispensetime'>set</button></td></tr>
+            <tr><td>vacuum</td>        <td><input id="rvacuum" readonly> torr </td>     <td><input id='vacuum'> </input>torr</td><td><button id='set_vacuum'>set</button></td></tr>
             </table>
 
-            <input id="dispense_in" style="width:200px;text-align:left;"></input><button id="dispense_send">Send</button>
+            <input id="dispense_in" style="width:200px;text-align:left;"></input><button id="dispense_send">send</button>
             <div id="dispense_out" class="terminal"></div>
             <label class="container">
                 fire ready  <input type="checkbox" checked="checked" id="fire_ready">
              <span class="checkmark"></span>
             </label>
             <label class="container">
-                camera ready  <input type="checkbox"  id="camera_ready">
+                orient keys to camera  <input type="checkbox"  id="camera_ready">
              <span class="checkmark"></span>
             </label>
 
@@ -175,13 +174,13 @@
 
         <h2 id="ender_head">Ender Settings</h2>
         <div id = "ender_list">
-            <input id="ender_in" style="width:200px;text-align:left;"></input><button id="ender_send">Send</button>
+            <input id="ender_in" style="width:200px;text-align:left;"></input><button id="ender_send">send</button>
              <div id="ender_out" class="terminal"></div>
         </div>
 
         <h2 id="exec_head">Spooky Scary</h2>
         <div id = "exec_list">
-            <input id="exec_in" style="width:200px;text-align:left;"></input><button id="exec_send">Send</button>
+            <input id="exec_in" style="width:200px;text-align:left;"></input><button id="exec_send">send</button>
             <div id="exec_out" class="terminal"></div>
         </div>
     
@@ -244,6 +243,7 @@
                 set = parts[3].split("/").at(-1)
                 $("#bactual").val(actual);
                 $("#bset").val(set);
+                if ( $('input:focus').length == 0 ) {if ($("#setb").val() == "") $("#setb").val(set);}
             }
 
 
@@ -360,13 +360,30 @@
             function togglePressure(){return printer_control("DI  ");}
 
 
-            function get_PTV()
+            PtV = {}
+            function get_PtV()
             {
                 printer_control("E8000",{'FB':true});
-                setTimeout( () => {$.get(`${purl}/read`,(data)=>{pos = data.lastIndexOf("15D0");console.log(data.slice(pos,pos+25))})},500);
+                setTimeout( () => {$.get(`${purl}/read`,(data)=>{
+                    pos = data.lastIndexOf("15D0");
+                    
+                    reading = data.slice(pos,pos+25)
+                    PtV['pressure'] = parseFloat(reading.slice(6,10))/10;
+                    PtV['dispensetime'] = parseFloat(reading.slice(12,17))/10000;
+                    PtV['vacuum'] = parseFloat(reading.slice(19,23))/10;
+
+
+                tss = ['pressure','dispensetime','vacuum']
+                for ( i in tss) $(`#r${tss[i]}`).val(PtV[tss[i]])
+                if ( $('input:focus').length == 0 ) { for ( i in tss){if ($(`#${tss[i]}`).val() == "" ) $(`#${tss[i]}`).val(PtV[tss[i]])}}
+
+    
+
+
+                })},500);
             }
 
-            setInterval(get_PTV,1000);
+            setInterval(get_PtV,1000);
 
             $("#set_pressure").click(()=>{
                pp  =  parseFloat($("#pressure").val())
