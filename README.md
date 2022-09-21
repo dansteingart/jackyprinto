@@ -14,7 +14,7 @@ This is a simple interface to a set of ender3 stages and the Ultimus V dispenser
 
 ## Interface
 
-![Untitled](Jacky%20Printo%20c9fa6f46cd034f869b3bac0427ab75c1/Untitled.png)
+![image](https://user-images.githubusercontent.com/152047/191505984-d33db4bd-52ad-4a55-872a-b159824c727f.png)
 
 | Control/Display | What It Does | Keyboard Shortcut |
 | --- | --- | --- |
