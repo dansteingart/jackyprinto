@@ -1,13 +1,14 @@
 /* 
-EnderScope (based on NodeForwader): an serial to http proxy driven by ghetto get calls
-requirements with some ender3 control hacks
+JackyPrinto (based on EnderScope based on NodeForwader): a printer control http proxy driven by focacta get calls, ersatz post calls, and just fine socket calls.
+
+Requirements with some ender3 control hacks
    -- serialport -> npm install serialport
    -- express -> npm install express
    -- sleep -> npm install sleep
    -- socket.io -> npm install socket.io
    -- cors -> npm install cors
 
-to start: node nodeforwader.js [HTTP PORT] [SERIAL PORT] [BAUD] [BUFFER LENGTH]
+to start: node nodeforwader.js [HTTP PORT] [SERIAL PORT] [BAUD] [BUFFER LENGTH] [ULTIMUS PORT RUNNING NODEFORWARDER]
 to read: http://[yourip]:[spec'd port]/read/  -> returns the last [BUFFER LENGTH] bytes from the serial port as a string
 to write: http://[yourip]:[spec'd port]/write/[YOUR STRING HERE]
 
@@ -15,26 +16,16 @@ what will probably create farts/list of things to deal with later if I need to:
 - returning characters that html has issues with
 - spaces in the url
 
-TODO as of 2021-12-31:
-
-[x] Update Parser and buffer handling
-[x] POST calls
-[x] v4l2 controls
-[x] absolute movement (maybe consolidate fields later)
-[x] project saving
-[ ] move some functionality to server for broader API ease
-	[x] position get
-	[x] v4l2-list
-	[x] v4l2-set [hard edge]
-
+TODO as of 2022-09-18:
+- [x] enqueue ultimus calls from gcode prints to get better timer behavior
 
 */
 
 parts = process.argv
 
-if (parts.length < 6)
+if (parts.length < 7)
 {
-	console.log("usage: node server.js [HTTP PORT] [SERIAL PORT] [BAUD] [BUFFER LENGTH] [LOG=YES optional]")
+	console.log("usage: node server.js [HTTP PORT] [SERIAL PORT] [BAUD] [BUFFER LENGTH] [DISPENSER PORT] [LOG=YES optional]")
 	process.exit(1);
 }
 
@@ -45,13 +36,16 @@ else
 	sp = parts[3]
 	baud = parseInt(parts[4])
 	blen = parseInt(parts[5])
+	durl = `http://localhost:${parts[6]}/write`
+	console.log(durl)
 }
 
 var logfile = false;
-if (parts.length == 7) logfile = true;
+if (parts.length == 8) logfile = true;
 
 const {exec} = require('child_process');
 const {spawn} = require('child_process');
+const axios = require('axios');
 
 var bodyParser = require('body-parser');
 var express = require('express');
@@ -70,7 +64,7 @@ var serialPort = new SerialPort(sp,{baudRate: baud});
 serialPort.on("open", function () { console.log('open');});  
 
 serialPort.on("close", function () { 
-	console.log('closed, reopening');
+		console.log('closed, reopening');
     	var serialPort = new SerialPort(sp,{baudrate: baud});
 }); 
 
@@ -90,9 +84,26 @@ serialPort.on('data', function(data) {
    if (buf.length > blen) buf = buf.substr(buf.length-blen,buf.length) 
    io.emit('data', data.toString('utf8'));
    current_position = find_position(buf);   
+
+   //catch strings coming from Ender to route to Ultimus
+   dd = data.toString("utf8").split("\r\n")[0];
+   if (dd.search("_DA:") >-1)
+   {
+		out = dd.split(":")[1];
+		console.log(out);
+		out = "\x05\x02"+out+"\x03";
+		send_to_ultimus(out);
+   }
 });
 
 //helper fuctions
+
+function send_to_ultimus(strr){
+	//axios.post(durl,{'payload':strr}).catch((e)=>{console.log(e)})
+	axios.post(durl,{'payload':strr},{"headers": {"content-type": "application/json"}}).catch((e)=>{console.log(e)})
+		  
+}
+
 function parse_v4l2_controls(str)
 {
 	cntls = str.trim().split("\n")
@@ -138,7 +149,6 @@ function parse_position(str)
 
 //Enable Cross Site Scripting
 app.use(cors())
-
 app.use('/static',express.static('static'))
 app.use('/files',express.static('files'))
 
@@ -252,34 +262,26 @@ app.post('/write',function(req,res){
 });
 
 //Show Last Updated
-app.get('/lastread/',function(req,res){	
-	lhs = lh.toString();
-	res.send(lhs)
-});
+app.get('/lastread/',function(req,res){lhs = lh.toString();res.send(lhs)});
 
 //read buffer
 app.get('/read/', function(req, res){ res.send(buf) });
 
+// Report position and temperature @ a frequecy of 1000 * 1/interval
 
-
+interval = 1000;
 pget = "M114\r\n"
 tget = "M105\r\n"
 gets = [pget,tget];
 
-
-//setInterval(()=>{serialPort.write("M114\r\n")},250)
-setInterval(()=>{for (g in gets)serialPort.write(gets[g])},250)
-
+//setInterval(()=>{serialPort.write("M114\r\n")},250) //enderscope standard
+setInterval(()=>{for (g in gets)serialPort.write(gets[g])},interval)
 
 //weak interface
 app.get('/', function(req, res){ res.sendFile(__dirname + '/static/html/index.html');});
 app.get('/serial',   function(req, res){ res.sendFile( __dirname + '/static/html/serial.html');});
 app.get('/projects*', function(req, res){ res.sendFile( __dirname + '/static/html/projects.html');});
 
-
 //sockets
-io.on('connection', function(socket){
-	io.emit('data',buf);
-	socket.on('input', function(msg){serialPort.write(msg+"\r\n")});
-});
+io.on('connection', function(socket){io.emit('data',buf);socket.on('input', function(msg){serialPort.write(msg+"\r\n")});});
 

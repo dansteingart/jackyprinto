@@ -32,6 +32,76 @@
             }
             td{vertical-align: top;}
  
+            .container {
+            display: block;
+            position: relative;
+            padding-left: 30px;
+            margin-bottom: 12px;
+            cursor: pointer;
+            padding-top: 5px;
+            font-size: 22px;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            font-size: inherit;
+            }
+
+            /* Hide the browser's default checkbox */
+            .container input {
+            position: absolute;
+            opacity: 0;
+            cursor: pointer;
+            height: 0;
+            width: 0;
+            }
+
+            /* Create a custom checkbox */
+            .checkmark {
+            position: absolute;
+            top: 4;
+            left: 4;
+            height: 15px;
+            width: 15px;
+            background-color: #fff;
+            border: 2px black solid;
+            }
+
+            /* On mouse-over, add a grey background color */
+            .container:hover input ~ .checkmark {
+            background-color: #ccc;
+            }
+
+            /* When the checkbox is checked, add a blue background */
+            .container input:checked ~ .checkmark {
+            background-color: #292929;
+            }
+
+            /* Create the checkmark/indicator (hidden when not checked) */
+            .checkmark:after {
+            content: "";
+            position: absolute;
+            display: none;
+            }
+
+            /* Show the checkmark when checked */
+            .container input:checked ~ .checkmark:after {
+            display: block;
+            }
+
+            /* Style the checkmark/indicator */
+            .container .checkmark:after {
+            left: 4px;
+            top: 2px;
+            width: 5px;
+            height: 8px;
+            border: solid white;
+            border-width: 0 2px 2px 0;
+            -webkit-transform: rotate(35deg);
+            -ms-transform: rotate(35deg);
+            transform: rotate(35deg);
+            }
+ 
         </style>
     </head>
     <body>
@@ -51,9 +121,24 @@
 
         <h2 id="dispense_head">Dispenser Settings</h2>
         <div id = "dispense_list">
+            <table>
+            <tr><td>set pressure</td><td><input id='pressure' value=50> </input>psi</td><td><button id='set_pressure'>set</button></td></tr>
+            <tr><td>set dispense time</td><td><input id='dispensetime' value=0.01> </input>s</td><td><button id='set_dispensetime'>set</button></td></tr>
+            <tr><td>set vacuum</td><td><input id='vacuum' value=0.9 > </input>torr</td><td><button id='set_vacuum'>set</button></td></tr>
+            </table>
+
             <input id="dispense_in" style="width:200px;text-align:left;"></input><button id="dispense_send">Send</button>
             <div id="dispense_out" class="terminal"></div>
-            fire ready <input type="checkbox" id="fire_ready" >
+            <label class="container">
+                fire ready  <input type="checkbox" checked="checked" id="fire_ready">
+             <span class="checkmark"></span>
+            </label>
+            <label class="container">
+                camera ready  <input type="checkbox"  id="camera_ready">
+             <span class="checkmark"></span>
+            </label>
+
+            <!-- < !# fire ready <input type="checkbox" id="fire_ready" >  -->
 
         </div>
 
@@ -201,7 +286,7 @@
                 meta = {}
                 metas = $('[attr=meta]')
                 for (i = 0; i < metas.length;i++) 
-                {
+                {fire
                     meta[metas[i].id.replace("#","")] = metas[i].value
                 }
                 return meta
@@ -260,16 +345,50 @@
 
             }
 
-            function printer_control(str)
+            function printer_control(str,opts)
             {
+                ee = ""
+                try {if (opts['FB'])  ee = "\x06"}
+                catch (e) {}
                 ll = str.length.toString().padStart(2,"0")
                 cs = ultimus_cs(ll+str)
                 fullcmd = "\x02"+ll+str+cs+"\x03"
-                $.post(purl+"/write",data={'payload':'\x05'+fullcmd})      
+                $.post(purl+"/write",data={'payload':'\x05'+fullcmd+ee})      
                 return fullcmd
             }
             
             function togglePressure(){return printer_control("DI  ");}
+
+
+            function get_PTV()
+            {
+                printer_control("E8000",{'FB':true});
+                setTimeout( () => {$.get(`${purl}/read`,(data)=>{pos = data.lastIndexOf("15D0");console.log(data.slice(pos,pos+25))})},500);
+            }
+
+            setInterval(get_PTV,1000);
+
+            $("#set_pressure").click(()=>{
+               pp  =  parseFloat($("#pressure").val())
+               ss = `PS  ${pp.toFixed(1).replace(".","").padStart(4,"0")}`
+               console.log(ss)
+               printer_control(ss)
+            })
+
+            $("#set_dispensetime").click(()=>{
+               pp  =  parseFloat($("#dispensetime").val())
+               ss = `DS  ${pp.toFixed(4).replace(".","").padStart(4,"0")}`
+               console.log(ss)
+               printer_control(ss)
+            })
+
+            $("#set_vacuum").click(()=>{
+               pp  =  parseFloat($("#vacuum").val())
+               ss = `VS  ${pp.toFixed(1).replace(".","").padStart(4,"0")}`
+               console.log(ss)
+               printer_control(ss)
+            })
+
 
             $("#v42l_head").click(()=>{$("#v4l2_table").toggle()})
             $("#zscan_head").click(()=>{$("#zscan_table").toggle()})            
@@ -370,18 +489,38 @@
                 xy = parseFloat($("#movexy").val())
                 if ($("input").is(":focus") == false & $("textarea").is(":focus") == false)
                 {
-                    switch(e.originalEvent.keyCode)
+                    //console.log(e.originalEvent.keyCode);
+                    if ($("#camera_ready")[0].checked)
                     {
-                        case 37: move(-1*xy,0,0); break;
-                        case 39: move(1*xy,0,0);break;
-                        case 38: move(0,1*xy,0);break;
-                        case 40: move(0,-1*xy,0);break;
-                        case 87: move(0,0,zz);break;
-                        case 83: move(0,0,-1*zz);break;
-                        case 77: get_position();break;
-                        case 79: steppers_off();break;
-                        case 67: snapshot();break;
-                        case 71: if ($("#fire_ready")[0].checked){togglePressure()};break;
+                        switch(e.originalEvent.keyCode)
+                        {
+                            case 40: move(-1*xy,0,0); break;
+                            case 38: move(1*xy,0,0);break;
+                            case 37: move(0,1*xy,0);break;
+                            case 39: move(0,-1*xy,0);break;
+                            case 87: move(0,0,zz);break;
+                            case 83: move(0,0,-1*zz);break;
+                            case 77: get_position();break;
+                            case 79: steppers_off();break;
+                            case 67: snapshot();break;
+                            case 71: if ($("#fire_ready")[0].checked){togglePressure()};break;
+                        }
+                    }
+                    else 
+                    {                    
+                        switch(e.originalEvent.keyCode)
+                        {
+                            case 37: move(-1*xy,0,0); break;
+                            case 39: move(1*xy,0,0);break;
+                            case 38: move(0,1*xy,0);break;
+                            case 40: move(0,-1*xy,0);break;
+                            case 87: move(0,0,zz);break;
+                            case 83: move(0,0,-1*zz);break;
+                            case 77: get_position();break;
+                            case 79: steppers_off();break;
+                            case 67: snapshot();break;
+                            case 71: if ($("#fire_ready")[0].checked){togglePressure()};break;
+                        }
                     }
                 }
 
